@@ -1,19 +1,29 @@
 export const config = {
   runtime: 'edge',
-  regions: ['sfo1'], // 依然死死锁住旧金山
+  regions: ['sfo1'],
 };
 
 export default async function handler(req) {
   const url = new URL(req.url);
-  
-  // 直接把域名替换成 Google 的，完全不需要再做路径切割（因为我们等下会把 /api 从 Python 里拿掉）
   url.host = 'generativelanguage.googleapis.com';
-  
-  // 复制请求并转发
-  const newReq = new Request(url, req);
-  // 抹除原本的 IP 头，防止 Google 顺藤摸瓜看到你的香港 IP
-  newReq.headers.delete('x-forwarded-for');
-  newReq.headers.delete('x-real-ip');
-  
-  return fetch(newReq);
+
+  // 1. 获取原始请求的 Body
+  let body = null;
+  if (req.method === 'POST' || req.method === 'PUT') {
+    body = await req.arrayBuffer(); // 读取原始二进制流，防止字符集碎裂
+  }
+
+  // 2. 显式组装全新的请求配置
+  const fetchOptions = {
+    method: req.method,
+    headers: new Headers(req.headers),
+    body: body,
+  };
+
+  // 3. 彻底抹除 Vercel 的代理特征头，防止被谷歌风控
+  fetchOptions.headers.delete('x-forwarded-for');
+  fetchOptions.headers.delete('x-real-ip');
+  fetchOptions.headers.delete('host');
+
+  return fetch(new Request(url, fetchOptions));
 }
